@@ -57,10 +57,13 @@ export function up(db: Db): void {
   `);
   const apply = db.transaction(() => {
     for (const a of additions) insert.run(...a);
-    // Re-assert every column: a disable-down leaves rows present where
-    // INSERT OR IGNORE is a no-op (V24 pattern). Absolute SETs keep up
-    // idempotent and the down/up round trip bit-for-bit stable.
+    // Re-assert every column on this migration's OWN rows only: a
+    // disable-down leaves rows present where INSERT OR IGNORE is a no-op
+    // (V24 pattern). Pre-existing rows (the 2 V20 kilo ids) are excluded —
+    // overwriting their windows/names is not this migration's business.
+    const preexisting = new Set(['nvidia/nemotron-3-super-120b-a12b:free', 'stepfun/step-3.7-flash:free']);
     for (const a of additions) {
+      if (a[0] === 'kilo' && preexisting.has(a[1])) continue;
       reassert.run(a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[13], a[14], a[0], a[1]);
     }
     backfillFallback(db);
