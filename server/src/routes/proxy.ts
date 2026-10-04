@@ -187,7 +187,7 @@ const REASONING_TTL_MS = 30 * 60 * 1000; // 30 min, matching sticky sessions
 // OpenCode Zen is on record for this (the DeepSeek thinking semantics behind
 // #255/#797); everywhere else only the turn we actually have a trace for is
 // touched, so no other provider's bytes change.
-const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode']);
+const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode', 'opencode-free']);
 
 function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {
   if (!sessionKey || !reasoning) return;
