@@ -81,4 +81,24 @@ describe('antigravity request path', () => {
     expect((projectBody as { project?: string })?.project).toBe('proj.test_live');
     expect(out.choices[0]?.message.content).toContain('hello');
   });
+
+  it('maps google_search to a grounding block, not a function declaration', () => {
+    const body = buildGenerateBody(
+      [{ role: 'user', content: 'what is the weather' }],
+      'gemini-3.8-flash',
+      'gemini-3.8-flash-high',
+      'proj.test_1',
+      {
+        tools: [
+          { type: 'function', function: { name: 'google_search', description: '', parameters: {} } },
+          { type: 'function', function: { name: 'custom_calc', description: 'calc', parameters: {} } },
+        ],
+      },
+    );
+    const req = body['request'] as { tools?: Array<Record<string, unknown>>; toolConfig?: unknown };
+    expect(req.tools).toEqual([
+      { google_search: {} },
+      { functionDeclarations: [{ name: 'custom_calc', description: 'calc', parameters: {} }] },
+    ]);
+  });
 });

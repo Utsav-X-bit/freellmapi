@@ -176,6 +176,17 @@ export const MODEL_PRICING: PricingRow[] = [
   ['opencode-free', 'nemotron-3.5-lightning-free', 0, 0],
   ['opencode-free', 'big-pickle', 0, 0],
 
+  // Google Antigravity (multi-provider catalog under per-user Google OAuth;
+  // all 8 models free under personal account quota, so explicit 0/0).
+  ['antigravity', 'claude-opus-4-6', 0, 0],
+  ['antigravity', 'claude-sonnet-4-6', 0, 0],
+  ['antigravity', 'gemini-3.1-pro', 0, 0],
+  ['antigravity', 'gemini-3.5-flash', 0, 0],
+  ['antigravity', 'gemini-3.6-flash', 0, 0],
+  ['antigravity', 'gemini-3.7-flash', 0, 0],
+  ['antigravity', 'gemini-3.8-flash', 0, 0],
+  ['antigravity', 'gpt-oss-120b', 0, 0],
+
   // OpenRouter :free pools (priced at the same model's paid variant)
   // V23 additions snapshot the OpenRouter pricing API on 2026-06-07.
   ['openrouter', 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free', null, null], // free-only route

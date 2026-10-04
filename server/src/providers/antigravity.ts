@@ -209,21 +209,38 @@ export function buildGeminiBody(
   const thinking = getThinkingConfig(runtimeModel, options?.reasoning_effort ?? 'off');
   if (thinking) generationConfig['thinkingConfig'] = thinking;
   if (Object.keys(generationConfig).length > 0) body['generationConfig'] = generationConfig;
-  const tools = options?.tools?.map((t: ChatToolDefinition) => ({
-    functionDeclarations: [{
-      name: t.function.name,
-      description: t.function.description,
-      parameters: t.function.parameters,
-    }],
-  }));
+  const tools = toAntigravityTools(options?.tools);
   if (tools?.length) body['tools'] = tools;
-  if (options?.tool_choice && options.tool_choice !== 'auto') {
+  if (options?.tool_choice && options.tool_choice !== 'auto' && tools?.some(t => 'functionDeclarations' in t)) {
     const choice = options.tool_choice as ChatToolChoice;
     body['toolConfig'] = {
       functionCallingConfig: { mode: typeof choice === 'string' ? choice.toUpperCase() : 'ANY' },
     };
   }
   return body;
+}
+
+const GROUNDING_TOOL_NAMES = new Set(['google_search', 'googlesearch', 'google_search_retrieval']);
+
+export function toAntigravityTools(tools?: ChatToolDefinition[]): Array<Record<string, unknown>> | undefined {
+  if (!tools || tools.length === 0) return undefined;
+  const functionDeclarations: Array<Record<string, unknown>> = [];
+  let grounding = false;
+  for (const t of tools) {
+    if (GROUNDING_TOOL_NAMES.has(t.function.name.toLowerCase())) {
+      grounding = true;
+      continue;
+    }
+    functionDeclarations.push({
+      name: t.function.name,
+      description: t.function.description,
+      parameters: t.function.parameters,
+    });
+  }
+  const out: Array<Record<string, unknown>> = [];
+  if (grounding) out.push({ google_search: {} });
+  if (functionDeclarations.length > 0) out.push({ functionDeclarations });
+  return out.length > 0 ? out : undefined;
 }
 
 /** Quota-wall classification: hard per-account walls carry a reset hint and
