@@ -30,6 +30,7 @@ function sessionId(now = Date.now()): string {
 function requestId(now = Date.now()): string {
   return `msg_${hex6(BigInt(now) * 0x1000n + 1n)}${rand14()}`;
 }
+const OPENCODE_SESSION = sessionId();
 
 export function isResponsesModel(modelId: string): boolean {
   return modelId === 'muse-spark-1.2-contributor-free' || modelId === 'muse-spark-1.3-contributor-free';
@@ -94,7 +95,7 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
       'User-Agent': OPENCODE_UA,
       'x-opencode-client': 'desktop',
       'x-opencode-project': 'global',
-      'x-opencode-session': sessionId(),
+      'x-opencode-session': OPENCODE_SESSION,
       'x-opencode-request': requestId(),
       'Accept': 'text/event-stream',
     };
@@ -144,13 +145,14 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
     return tools;
   }
 
-  private responsesBody(messages: ChatMessage[], modelId: string, options: CompletionOptions | undefined, stream: boolean): Record<string, unknown> {
+  private responsesBody(messages: ChatMessage[], modelId: string, options: CompletionOptions | undefined): Record<string, unknown> {
     const alias = options && typeof options === 'object' && 'max_completion_tokens' in options
       ? options.max_completion_tokens
       : undefined;
     const requested = options?.max_tokens ?? (typeof alias === 'number' ? alias : undefined);
     const maxOutput = resolveMaxTokens(this.platform, requested, options?.contextBudget);
-    const body: Record<string, unknown> = { model: modelId, input: this.responsesInput(messages), store: false, stream };
+    // OpenCode Zen gate: stream:false -> 403 FreeTierError even with valid UA/session.
+    const body: Record<string, unknown> = { model: modelId, input: this.responsesInput(messages), store: false, stream: true };
     if (maxOutput !== undefined) body.max_output_tokens = maxOutput;
     const tools = this.responsesTools(options);
     if (tools.length > 0) body.tools = tools;
@@ -191,6 +193,42 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
     return options?.timeoutMs ?? providerTimeoutMs(this.platform, 60_000);
   }
 
+  private async *readResponsesSseStream(res: Response, modelId: string): AsyncGenerator<ChatCompletionChunk> {
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('No response body');
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const base = { id: `chatcmpl-muse-${Date.now()}`, object: 'chat.completion.chunk' as const, created: Math.floor(Date.now() / 1000), model: modelId };
+    yield { ...base, choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] };
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === '[DONE]') return;
+          try {
+            const parsed = JSON.parse(data) as Record<string, unknown>;
+            if (parsed.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
+              yield { ...base, choices: [{ index: 0, delta: { content: parsed.delta as string }, finish_reason: null }] };
+            } else if (parsed.type === 'response.completed') {
+              yield { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+              return;
+            }
+          } catch {}
+        }
+      }
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+    yield { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+  }
+
   async chatCompletion(
     apiKey: string,
     messages: ChatMessage[],
@@ -202,14 +240,27 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
       const res = await this.fetchWithTimeout(`${this.baseUrl}/responses`, {
         method: 'POST',
         headers: this.wireHeaders(apiKey),
-        body: JSON.stringify(this.responsesBody(messages, modelId, options, false)),
+        body: JSON.stringify(this.responsesBody(messages, modelId, options)),
       }, this.requestTimeoutMs(options), { signal: options?.signal, timeoutBounds: 'request' });
       this.record(res, 'responses', quotaContext, modelId);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw providerHttpError(res, `${this.name} API error ${res.status}: ${upstreamErrorText(err, res)}`, err);
       }
-      return this.translateResponses(await res.json() as ResponsesObject, modelId);
+      let content = '';
+      for await (const chunk of this.readResponsesSseStream(res, modelId)) {
+        const text = chunk.choices?.[0]?.delta?.content;
+        if (typeof text === 'string') content += text;
+      }
+      return {
+        id: `chatcmpl-muse-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: modelId,
+        choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        _routed_via: { platform: this.platform, model: modelId },
+      };
     }
     const sampling = this.samplingForModel(modelId, options);
     const shaped = this.chatBody(messages, modelId, options);
@@ -270,16 +321,17 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
     quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
     if (isResponsesModel(modelId)) {
-      // Brief-allowed Sail-style fallback: the upstream request above is
-      // non-streaming (buffered synthesis keeps the translator small and
-      // shape-stable — no Responses SSE event mapping).
-      const full = await this.chatCompletion(apiKey, messages, modelId, options, quotaContext);
-      const choice = full.choices[0];
-      const content = choice ? contentToString(choice.message.content) : '';
-      const base = { id: full.id, object: 'chat.completion.chunk' as const, created: full.created, model: full.model };
-      yield { ...base, choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] };
-      if (content) yield { ...base, choices: [{ index: 0, delta: { content }, finish_reason: null }] };
-      yield { ...base, choices: [{ index: 0, delta: {}, finish_reason: choice?.finish_reason ?? 'stop' }] };
+      const res = await this.fetchWithTimeout(`${this.baseUrl}/responses`, {
+        method: 'POST',
+        headers: this.wireHeaders(apiKey),
+        body: JSON.stringify(this.responsesBody(messages, modelId, options)),
+      }, this.requestTimeoutMs(options), { signal: options?.signal });
+      this.record(res, 'responses', quotaContext, modelId);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw providerHttpError(res, `${this.name} API error ${res.status}: ${upstreamErrorText(err, res)}`, err);
+      }
+      yield* this.readResponsesSseStream(res, modelId);
       return;
     }
     const sampling = this.samplingForModel(modelId, options);

@@ -47,15 +47,17 @@ describe('opencode-free fingerprint', () => {
 describe('opencode-free responses routing + validateKey', () => {
   it('routes Muse models to POST /responses, others to /chat/completions', async () => {
     const urls: string[] = [];
-    vi.spyOn(global, 'fetch').mockImplementation(async (u: any, init: any) => {
+    vi.spyOn(global, 'fetch').mockImplementation(async (u: unknown) => {
       urls.push(String(u));
-      return { ok: true, status: 200, headers: new Headers(),
-        json: () => Promise.resolve({ id: 'r1', object: 'response', created: 1, model: 'muse-spark-1.3-contributor-free',
-          output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }) } as unknown as Response;
+      const sseData =
+        `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'ok' })}\n\n` +
+        `data: ${JSON.stringify({ type: 'response.completed' })}\n\n`;
+      return new Response(sseData, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
     });
     const p = new OpenCodeFreeProvider();
-    await p.chatCompletion('no-key', [{ role: 'user', content: 'hi' }], 'muse-spark-1.3-contributor-free');
+    const out = await p.chatCompletion('no-key', [{ role: 'user', content: 'hi' }], 'muse-spark-1.3-contributor-free');
     expect(urls[0]).toContain('/responses');
+    expect(out.choices[0]?.message.content).toContain('ok');
   });
 
   it('validateKey accepts 200, rejects 403 FreeTierError with message', async () => {

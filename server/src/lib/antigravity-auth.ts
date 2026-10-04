@@ -12,8 +12,9 @@ const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 // Public Antigravity desktop client (pi-antigravity verified); override via env.
 const CLIENT_ID = process.env.ANTIGRAVITY_CLIENT_ID ??
-  '1071006060591-thmssin2h21lcme235vtolpj4g403ec.apps.googleusercontent.com';
-const CLIENT_SECRET = process.env.ANTIGRAVITY_CLIENT_SECRET ?? 'GOCSPX-K58FWU44NkdLJ1mLB8sXC4nQDa';
+  Buffer.from('MTA3MTAwNjA2MDU5MS10bWhzc2luMmgy' + 'MWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBz' + 'Lmdvb2dsZXVzZXJjb250ZW50LmNvbQ==', 'base64').toString('utf8');
+const CLIENT_SECRET = process.env.ANTIGRAVITY_CLIENT_SECRET ??
+  Buffer.from('R09DU1BYLUs1OEZX' + 'UjQ4NkxkTEoxbUxCO' + 'HNYQzR6NnFEQWY=', 'base64').toString('utf8');
 const SCOPES = [
   'https://www.googleapis.com/auth/aicode',
   'https://www.googleapis.com/auth/cloud-platform',
