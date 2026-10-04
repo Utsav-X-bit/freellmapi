@@ -54,7 +54,7 @@ describe('quirks resolution (migrateQuirksV1)', () => {
     // Pollinations chat now requires a publishable key; three anonymous
     // providers remain in the baseline selector.
     const platforms = keyless!.targets.map((t) => t.platform).sort();
-    expect(platforms).toEqual(['kilo', 'llm7', 'ovh']);
+    expect(platforms).toEqual(['kilo', 'llm7', 'opencode-free', 'ovh']);
   });
 
   it('resolves stably and dedups overlapping selectors', () => {

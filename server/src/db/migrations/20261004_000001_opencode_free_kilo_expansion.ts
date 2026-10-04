@@ -70,6 +70,21 @@ export function up(db: Db): void {
       `UPDATE fallback_config SET enabled = 1 WHERE model_db_id IN (SELECT id FROM models WHERE ${MINE_BARE})`,
       `UPDATE profile_models SET enabled = 1 WHERE model_db_id IN (SELECT id FROM models WHERE ${MINE_BARE})`,
     ]) db.prepare(stmt).run(...KILO_IDS);
+    // Quirk: the fingerprint path is all-or-nothing — if Zen closes it,
+    // every opencode-free row 403s together. Fixed ids (1000+) outside the
+    // baseline AUTOINCREMENT range + INSERT OR REPLACE: re-running never
+    // mints new ids, so the down/up round trip stays bit-for-bit stable.
+    db.prepare(`
+      INSERT OR REPLACE INTO quirks (id, slug, title, body, severity, created_at_ms, updated_at_ms)
+      VALUES (1000, 'zen-fingerprint-required', 'Keyless Zen fingerprint auth',
+        'opencode-free sends Bearer public + OpenCode client headers (UA, x-opencode-*) and injected stub tools; no user key. If Zen closes the fingerprint path, all rows 403 together.',
+        'warning', 1788307200000, 1788307200000)
+    `).run();
+    db.prepare(`DELETE FROM quirk_targets WHERE quirk_id = 1000`).run();
+    db.prepare(`INSERT INTO quirk_targets (id, quirk_id, platform, model_glob) VALUES (1000, 1000, 'opencode-free', NULL)`).run();
+    // Extend the curated keyless-anonymous selector with the new platform.
+    // Fixed id (1001) for the same round-trip reason.
+    db.prepare(`INSERT OR IGNORE INTO quirk_targets (id, quirk_id, platform, model_glob) SELECT 1001, id, 'opencode-free', NULL FROM quirks WHERE slug = 'keyless-anonymous'`).run();
   });
   apply();
 }

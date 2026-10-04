@@ -85,6 +85,25 @@ export const MODEL_PRICING: PricingRow[] = [
   ['kilo', 'poolside/laguna-m.1:free', null, null],
   ['kilo', 'poolside/laguna-xs.2:free', null, null],
   ['kilo', 'stepfun/step-3.7-flash:free', 0.20, 1.15],
+  // Kilo :free expansion (keyless gateway — genuinely $0; explicit 0/0
+  // marks verified-free, null where no paid equivalent exists).
+  ['kilo', 'kilo-auto/free', 0, 0],
+  ['kilo', 'nvidia/nemotron-3-ultra-550b-a55b:free', 0, 0],
+  ['kilo', 'dots-studio/dots-3-note-preview:free', 0, 0],
+  ['kilo', 'cohere/north-mini-code:free', 0, 0],
+  ['kilo', 'poolside/laguna-xs-2.1:free', null, null],
+  ['kilo', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 0, 0],
+  ['kilo', 'openrouter/free', 0, 0],
+  ['kilo', 'nvidia/nemotron-3.5-lightning:free', 0, 0],
+  ['kilo', 'nvidia/nemotron-3.5-content-safety:free', 0, 0],
+  ['kilo', 'inclusionai/ling-3.0-flash-sante:free', 0, 0],
+  ['kilo', 'inclusionai/ling-3.0-flash-fin:free', 0, 0],
+  ['kilo', 'liquid/lfm-2.5-2.6b:free', 0, 0],
+  ['kilo', 'poolside/laguna-s-2.1:free', null, null],
+  ['kilo', 'minimax/minimax-m3:free', 0, 0],
+  ['kilo', 'thinkingmachines/inkling-small:free', 0, 0],
+  ['kilo', 'thinkingmachines/inkling:free', 0, 0],
+  ['kilo', 'minimax/minimax-m2.7:free', 0, 0],
 
   // LLM7
   ['llm7', 'codestral-latest', 0.30, 0.90],
@@ -145,6 +164,17 @@ export const MODEL_PRICING: PricingRow[] = [
   ['opencode', 'minimax-m3-free', 0.30, 1.20],
   ['opencode', 'nemotron-3-super-free', 0.09, 0.45],
   ['opencode', 'nemotron-3-ultra-free', 0.50, 2.50],
+
+  // OpenCode Zen free tier (keyless fingerprint path — genuinely $0, so
+  // explicit 0/0 marks verified-free rather than paid-variant estimates).
+  ['opencode-free', 'muse-spark-1.3-contributor-free', 0, 0],
+  ['opencode-free', 'muse-spark-1.2-contributor-free', 0, 0],
+  ['opencode-free', 'mimo-v2.5-free', 0, 0],
+  ['opencode-free', 'mimo-v2.6-flash-free', 0, 0],
+  ['opencode-free', 'ling-3.0-flash-fin-free', 0, 0],
+  ['opencode-free', 'nemotron-3-ultra-free', 0, 0],
+  ['opencode-free', 'nemotron-3.5-lightning-free', 0, 0],
+  ['opencode-free', 'big-pickle', 0, 0],
 
   // OpenRouter :free pools (priced at the same model's paid variant)
   // V23 additions snapshot the OpenRouter pricing API on 2026-06-07.
