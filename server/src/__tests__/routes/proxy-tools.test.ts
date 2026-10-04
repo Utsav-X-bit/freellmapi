@@ -375,4 +375,90 @@ describe('Proxy tool-calling support', () => {
     expect(calls[2].messages[1].reasoning_content).toBeUndefined();
     expect(calls[2].messages.some((m: any) => 'reasoning_content' in m)).toBe(false);
   });
+
+  // Phase-1 port (opencode-free + kilo expansion): model ids with slashes
+  // and colons must reach the upstream byte-for-byte — no slug flattening.
+  it('passes verbatim kilo :free ids with slashes/colons to the upstream', async () => {
+    const origFetch = global.fetch;
+    let providerBody: any = null;
+    let providerUrl = '';
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.includes('api.kilo.ai/api/gateway')) {
+        providerUrl = urlStr;
+        providerBody = JSON.parse((init as any).body);
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'chatcmpl-k', object: 'chat.completion', created: 1, model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'verbatim ok' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+          }),
+        } as any;
+      }
+      return origFetch(url, init);
+    });
+
+    const db = getDb();
+    const kiloRow = db.prepare("SELECT id FROM models WHERE platform = 'kilo' AND model_id = 'nvidia/nemotron-3-ultra-550b-a55b:free' AND enabled = 1").get() as { id: number } | undefined;
+    expect(kiloRow).toBeDefined();
+    await request(app, 'POST', '/api/keys', { platform: 'kilo', key: '' });
+
+    const { status } = await request(app, 'POST', '/v1/chat/completions', {
+      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      messages: [{ role: 'user', content: 'verbatim id test' }],
+    }, authHeaders());
+
+    expect(status).toBe(200);
+    expect(providerUrl).toContain('api.kilo.ai');
+    expect(providerBody.model).toBe('nvidia/nemotron-3-ultra-550b-a55b:free');
+  });
+
+  // Phase-1 port: opencode-free sends the Zen fingerprint (Bearer public +
+  // x-opencode-*) and forces stream:true with the four stub tools present.
+  it('sends the Zen fingerprint on opencode-free requests', async () => {
+    const origFetch = global.fetch;
+    let sentHeaders: Record<string, string> = {};
+    let providerBody: any = null;
+
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.includes('opencode.ai/zen/v1/chat/completions')) {
+        sentHeaders = Object.fromEntries(
+          Object.entries(((init as any).headers ?? {}) as Record<string, string>)
+            .map(([k, v]) => [String(k).toLowerCase(), String(v)]),
+        );
+        providerBody = JSON.parse((init as any).body);
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'chatcmpl-z', object: 'chat.completion', created: 1, model: 'mimo-v2.5-free',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'fingerprint ok' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+          }),
+        } as any;
+      }
+      return origFetch(url, init);
+    });
+
+    const db = getDb();
+    const zenRow = db.prepare("SELECT id FROM models WHERE platform = 'opencode-free' AND model_id = 'mimo-v2.5-free' AND enabled = 1").get() as { id: number } | undefined;
+    expect(zenRow).toBeDefined();
+    await request(app, 'POST', '/api/keys', { platform: 'opencode-free', key: '' });
+
+    const { status } = await request(app, 'POST', '/v1/chat/completions', {
+      model: 'mimo-v2.5-free',
+      messages: [{ role: 'user', content: 'fingerprint test' }],
+    }, authHeaders());
+
+    expect(status).toBe(200);
+    expect(sentHeaders['authorization']).toBe('Bearer public');
+    expect(sentHeaders['user-agent']).toBe('opencode/1.18.31');
+    expect(sentHeaders['x-opencode-client']).toBe('desktop');
+    expect(sentHeaders['x-opencode-session']).toMatch(/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    expect(providerBody.stream).toBe(true);
+    const names = (providerBody.tools ?? []).map((t: any) => t?.function?.name);
+    for (const n of ['bash', 'glob', 'grep', 'read']) expect(names).toContain(n);
+  });
 });
