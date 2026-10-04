@@ -50,7 +50,7 @@ MCowBQYDK2VwAyEAq9yv4+3EeyMHKsfVYBhkcz1lYgIXSUeHNnN6tNgYX3k=
 
 // Catalogs older than this are ignored. Bump to today's date whenever a model
 // migration lands, so the bundled DB is always the floor.
-export const MIN_CATALOG_VERSION = '2026.06.07';
+export const MIN_CATALOG_VERSION = '2026.10.05';
 
 const SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // twice daily
 const BOOT_DELAY_MS = 10 * 1000; // let the server settle before first sync
@@ -631,8 +631,10 @@ function applyCatalogInner(db: Db, catalog: Catalog): NonNullable<SyncResult['co
       .all() as { id: number; platform: string; model_id: string }[];
     const deleteFb = db.prepare('DELETE FROM fallback_config WHERE model_db_id = ?');
     const deleteModel = db.prepare('DELETE FROM models WHERE id = ?');
+    const managed = catalogPlatforms(catalog);
     for (const c of candidates) {
       if (!hasProvider(c.platform as Platform)) continue; // not catalog-managed by this binary
+      if (!managed.has(c.platform)) continue; // this catalog does not manage this platform; don't prune it
       if (!inCatalog.has(`${c.platform}:${c.model_id}`)) {
         deleteFb.run(c.id);
         deleteModel.run(c.id);
@@ -647,7 +649,6 @@ function applyCatalogInner(db: Db, catalog: Catalog): NonNullable<SyncResult['co
     // managedPlatforms. Rows the catalog listed were adopted above and are
     // source='catalog' by now, so what is left is exactly the discovered
     // stopgap the catalog has superseded.
-    const managed = catalogPlatforms(catalog);
     const discoveredRows = db
       .prepare('SELECT id, platform FROM models WHERE source = ?')
       .all(DISCOVERED_MODEL_SOURCE) as { id: number; platform: string }[];

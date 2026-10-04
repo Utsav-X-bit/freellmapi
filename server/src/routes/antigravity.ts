@@ -36,7 +36,15 @@ antigravityRouter.post('/exchange', async (req: Request, res: Response) => {
     res.status(400).json({ error: { message: parsed.error.errors.map(e => e.message).join(', ') } });
     return;
   }
-  const { code, verifier, label } = parsed.data;
+  const { verifier, label } = parsed.data;
+  let code = parsed.data.code.trim();
+  if (code.includes('code=')) {
+    try {
+      const u = new URL(code.startsWith('http') ? code : `http://localhost/${code}`);
+      const c = u.searchParams.get('code');
+      if (c) code = c;
+    } catch {}
+  }
   let tokens;
   try {
     tokens = await exchangeCode(code, verifier);

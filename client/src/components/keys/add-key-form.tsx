@@ -13,6 +13,7 @@ import { toast } from '@/lib/toast'
 import type { FallbackEntry } from '@/lib/routing'
 import { scopeCandidates, shouldOfferModelPicker, type ScopeCandidate } from '@/lib/model-scope-selection'
 import { GetKeyLink, PLATFORMS } from './shared'
+import { ExternalLink } from 'lucide-react'
 
 /** A key that just landed, plus the models the picker should offer for it.
  *  Only produced when the picker is actually worth showing (#657) — otherwise
@@ -40,6 +41,7 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
   const [apiKey, setApiKey] = useState('')
   const [accountId, setAccountId] = useState('')
   const [label, setLabel] = useState('')
+  const [oauthCode, setOauthCode] = useState('')
   const [addAttempted, setAddAttempted] = useState(false)
   // Several credentials for one provider in one go (#705). Pooling keys is the
   // point of this app, and the only bulk path was the file importer, so anyone
@@ -136,6 +138,33 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
     },
   })
 
+  const isAntigravity = platform === 'antigravity'
+  const { data: antigravityAuth } = useQuery<{ url: string; state: string; verifier: string }>({
+    queryKey: ['antigravity-auth-url'],
+    queryFn: () => apiFetch('/api/antigravity/auth-url'),
+    enabled: isAntigravity,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const exchangeAntigravity = useMutation({
+    mutationFn: (body: { code: string; state?: string; verifier: string; label?: string }) =>
+      apiFetch<{ id: number; platform: string; enabled: boolean }>('/api/antigravity/exchange', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+      queryClient.invalidateQueries({ queryKey: ['fallback'] })
+      queryClient.invalidateQueries({ queryKey: ['keys-providers'] })
+      toast.success(t('keys.keyAdded'))
+      onSuccess(scopeOffer(data?.id, 'antigravity', 'oauth'))
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Google sign-in exchange failed')
+    },
+  })
+
   const needsAccountId = platform === 'cloudflare'
   // Key-optional providers (Kilo, OVH, AI Horde) work anonymously, but accept a
   // real key too (#1331): the field stays editable and may be left blank.
@@ -160,6 +189,23 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (isAntigravity) {
+      if (!oauthCode.trim()) {
+        setAddAttempted(true)
+        return
+      }
+      if (!antigravityAuth?.verifier) {
+        toast.error('Google sign-in URL not loaded yet. Please wait or refresh.')
+        return
+      }
+      exchangeAntigravity.mutate({
+        code: oauthCode.trim(),
+        state: antigravityAuth.state,
+        verifier: antigravityAuth.verifier,
+        label: label || undefined,
+      })
+      return
+    }
     if (platformError || keyError || accountIdError) {
       setAddAttempted(true)
       return
@@ -210,6 +256,7 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
           />
           {addAttempted && <FieldError error={platformError} />}
           {(() => {
+            if (isAntigravity) return null
             const sel = PLATFORMS.find(p => p.value === platform)
             return sel?.url ? <div className="pt-0.5"><GetKeyLink url={sel.url} /></div> : null
           })()}
@@ -227,45 +274,80 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
             {addAttempted && <FieldError error={accountIdError} />}
           </div>
         )}
-        <div className="space-y-1.5 flex-1 min-w-[240px]">
-          <div className="flex items-center justify-between gap-2">
-            <Label className="text-xs">{needsAccountId ? t('keys.apiToken') : t('keys.customApiKey')}</Label>
-            {canPasteSeveral && (
-              <button
-                type="button"
-                onClick={() => setSeveral(v => !v)}
-                className={`text-[11px] underline-offset-2 hover:underline ${severalMode ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-              >
-                {t('keys.pasteSeveral')}
-              </button>
+        {isAntigravity ? (
+          <div className="space-y-2 flex-1 min-w-[280px] rounded-lg border border-border/80 bg-muted/20 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-foreground">Google OAuth Sign-In</span>
+              {antigravityAuth?.url && (
+                <a
+                  href={antigravityAuth.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                >
+                  <span>1. Open Google Sign-In</span>
+                  <ExternalLink className="size-3" />
+                </a>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Click &ldquo;Open Google Sign-In&rdquo; to authenticate in your browser, approve permissions, then copy the authorization code (or the callback URL) and paste it below.
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs">2. Paste authorization code or callback URL</Label>
+              <Input
+                value={oauthCode}
+                onChange={e => setOauthCode(e.target.value)}
+                placeholder="4/0A... paste code or redirect URL here"
+                className="font-mono text-xs"
+                aria-invalid={addAttempted && !oauthCode.trim()}
+              />
+              {addAttempted && !oauthCode.trim() && (
+                <FieldError error={t('validation.required')} />
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5 flex-1 min-w-[240px]">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs">{needsAccountId ? t('keys.apiToken') : t('keys.customApiKey')}</Label>
+              {canPasteSeveral && (
+                <button
+                  type="button"
+                  onClick={() => setSeveral(v => !v)}
+                  className={`text-[11px] underline-offset-2 hover:underline ${severalMode ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {t('keys.pasteSeveral')}
+                </button>
+              )}
+            </div>
+            {severalMode ? (
+              <Textarea
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder={'gsk_first…\ngsk_second…'}
+                rows={3}
+                className="font-mono text-xs"
+                aria-invalid={addAttempted && !!keyError}
+              />
+            ) : (
+              <Input
+                type="password"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder={isKeyless ? t('keys.keyOptionalPlaceholder') : (needsAccountId ? t('keys.bearerTokenPlaceholder') : t('keys.pasteKeyPlaceholder'))}
+                className="font-mono text-xs"
+                aria-invalid={addAttempted && !!keyError}
+              />
+            )}
+            {addAttempted && <FieldError error={keyError} />}
+            {isKeyless && (
+              <p className="text-[11px] text-muted-foreground">
+                {t('keys.keyOptionalHint')}
+              </p>
             )}
           </div>
-          {severalMode ? (
-            <Textarea
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder={'gsk_first…\ngsk_second…'}
-              rows={3}
-              className="font-mono text-xs"
-              aria-invalid={addAttempted && !!keyError}
-            />
-          ) : (
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder={isKeyless ? t('keys.keyOptionalPlaceholder') : (needsAccountId ? t('keys.bearerTokenPlaceholder') : t('keys.pasteKeyPlaceholder'))}
-              className="font-mono text-xs"
-              aria-invalid={addAttempted && !!keyError}
-            />
-          )}
-          {addAttempted && <FieldError error={keyError} />}
-          {isKeyless && (
-            <p className="text-[11px] text-muted-foreground">
-              {t('keys.keyOptionalHint')}
-            </p>
-          )}
-        </div>
+        )}
         <div className="space-y-1.5">
           <Label className="text-xs">{t('keys.label')}</Label>
           <div className="flex flex-wrap items-center space-x-3">
@@ -275,12 +357,16 @@ export function AddKeyForm({ onSuccess, initialPlatform }: { onSuccess: (offer?:
               placeholder={t('keys.customDisplayNameOptional')}
               className="w-[160px]"
             />
-            <Button type="submit" size="sm" disabled={pending}>
-              {pending
+            <Button type="submit" size="sm" disabled={pending || exchangeAntigravity.isPending}>
+              {exchangeAntigravity.isPending
                 ? t('keys.adding')
-                : severalMode && keyList.length > 1
-                  ? t('keys.importSelected', { count: keyList.length })
-                  : isKeyless && !apiKey.trim() ? t('keys.enable') : t('keys.addKey')}
+                : isAntigravity
+                  ? 'Complete Google Sign-in'
+                  : pending
+                    ? t('keys.adding')
+                    : severalMode && keyList.length > 1
+                      ? t('keys.importSelected', { count: keyList.length })
+                      : isKeyless && !apiKey.trim() ? t('keys.enable') : t('keys.addKey')}
             </Button>
           </div>
         </div>

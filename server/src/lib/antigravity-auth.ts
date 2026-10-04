@@ -7,7 +7,7 @@ export interface AntigravityCredential {
   expiry: number;
   email?: string;
 }
-
+export const REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 // Public Antigravity desktop client (pi-antigravity verified); override via env.
@@ -56,7 +56,7 @@ export function buildAuthUrl(state: string, verifier: string): { url: string; co
   const codeChallenge = b64url(createHash('sha256').update(verifier).digest());
   const q = new URLSearchParams({
     client_id: CLIENT_ID,
-    redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+    redirect_uri: REDIRECT_URI,
     response_type: 'code',
     scope: SCOPES,
     state,
@@ -107,7 +107,7 @@ export async function exchangeCode(
       grant_type: 'authorization_code',
       code,
       code_verifier: verifier,
-      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+      redirect_uri: REDIRECT_URI,
     }),
   });
   if (!res.ok) {
