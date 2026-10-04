@@ -39,3 +39,29 @@ describe('opencode-free fingerprint', () => {
     for (const n of ['bash', 'glob', 'grep', 'read']) expect(names).toContain(n);
   });
 });
+
+describe('opencode-free responses routing + validateKey', () => {
+  it('routes Muse models to POST /responses, others to /chat/completions', async () => {
+    const urls: string[] = [];
+    vi.spyOn(global, 'fetch').mockImplementation(async (u: any, init: any) => {
+      urls.push(String(u));
+      return { ok: true, status: 200, headers: new Headers(),
+        json: () => Promise.resolve({ id: 'r1', object: 'response', created: 1, model: 'muse-spark-1.3-contributor-free',
+          output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }) } as unknown as Response;
+    });
+    const p = new OpenCodeFreeProvider();
+    await p.chatCompletion('no-key', [{ role: 'user', content: 'hi' }], 'muse-spark-1.3-contributor-free');
+    expect(urls[0]).toContain('/responses');
+  });
+
+  it('validateKey accepts 200, rejects 403 FreeTierError with message', async () => {
+    const p = new OpenCodeFreeProvider();
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }), headers: new Headers() } as unknown as Response);
+    expect(await p.validateKey('no-key')).toBe(true);
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({ ok: false, status: 403, statusText: 'Forbidden',
+      json: () => Promise.resolve({ error: { message: "FreeTierError: OpenCode's free tier can only be used from within OpenCode" } }), headers: new Headers() } as unknown as Response);
+    const bad = await p.validateKey('no-key');
+    expect(bad).not.toBe(true);
+    expect((bad as { error: string }).error).toContain('FreeTierError');
+  });
+});
