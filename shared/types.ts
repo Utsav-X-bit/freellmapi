@@ -129,6 +129,9 @@ export type Platform =
   // OpenCode Zen free tier — keyless client-fingerprint access
   // (Bearer public + x-opencode-* headers); see providers/opencode-free.ts.
   | 'opencode-free'
+  // Google Antigravity / Cloud Code Assist — per-user Google OAuth (JSON blob
+  // credential), v1internal wire protocol; see providers/antigravity.ts.
+  | 'antigravity'
   // OVHcloud AI Endpoints — OpenAI-compatible, keyless anonymous tier
   // (2 req/min per IP per model); see migrateModelsV26.
   | 'ovh'
