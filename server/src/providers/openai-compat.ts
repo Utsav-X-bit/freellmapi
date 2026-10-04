@@ -74,7 +74,7 @@ export class OpenAICompatProvider extends BaseProvider {
   readonly name: string;
   protected readonly baseUrl: string;
   protected readonly extraHeaders: Record<string, string>;
-  private readonly validateUrl?: string;
+  protected readonly validateUrl?: string;
   /** Per-provider HTTP timeout override. OpenAI-compatible gateways often buffer
    * non-streaming responses until generation completes, and reasoning models can
    * take >15s before first byte. Default 60000. */
@@ -114,7 +114,7 @@ export class OpenAICompatProvider extends BaseProvider {
    * only accept single tool calls (NVIDIA NIM), force `false` whenever tools are
    * present so the model never tries to emit two at once and 400s; otherwise pass
    * the caller's value through unchanged. See issue #255. */
-  private resolveParallelToolCalls(options?: CompletionOptions): boolean | undefined {
+  protected resolveParallelToolCalls(options?: CompletionOptions): boolean | undefined {
     if (this.forceSingleToolCall && options?.tools && options.tools.length > 0) return false;
     return options?.parallel_tool_calls;
   }

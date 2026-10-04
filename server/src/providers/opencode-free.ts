@@ -135,9 +135,9 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
   /** Responses-shaped fingerprint tools (flat `{name, ...}`, not chat's `{function: {...}}`). */
   private responsesTools(options?: CompletionOptions): Array<Record<string, unknown>> {
     const tools: Array<Record<string, unknown>> = (options?.tools ?? []).map((t) => ({
-      type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters,
+      type: 'function', name: t?.function?.name, description: t?.function?.description, parameters: t?.function?.parameters,
     }));
-    const present = new Set((options?.tools ?? []).map((t) => t.function.name).filter(Boolean));
+    const present = new Set((options?.tools ?? []).map((t) => t?.function?.name).filter(Boolean));
     for (const n of FINGERPRINT_TOOLS) {
       if (present.has(n)) continue;
       tools.push({ type: 'function', name: n, description: `OpenCode built-in ${n} tool`, parameters: { type: 'object', properties: {} } });
@@ -226,7 +226,7 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
         stop: options?.stop,
         tools: shaped.tools,
         tool_choice: options?.tool_choice,
-        parallel_tool_calls: options?.parallel_tool_calls,
+        parallel_tool_calls: this.resolveParallelToolCalls(options),
         ...extendedBodyParams(this.platform, options),
         // Fingerprint requires stream:true even on the non-streaming entry point (Task 2 pins body.stream true).
         stream: true,
@@ -250,8 +250,9 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
     quotaContext?: QuotaObservationContext,
   ): AsyncGenerator<ChatCompletionChunk> {
     if (isResponsesModel(modelId)) {
-      // Brief-allowed Sail-style fallback: buffered synthesis keeps the
-      // translator small and shape-stable (no Responses SSE event mapping).
+      // Brief-allowed Sail-style fallback: the upstream request above is
+      // non-streaming (buffered synthesis keeps the translator small and
+      // shape-stable — no Responses SSE event mapping).
       const full = await this.chatCompletion(apiKey, messages, modelId, options, quotaContext);
       const choice = full.choices[0];
       const content = choice ? contentToString(choice.message.content) : '';
@@ -275,7 +276,7 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
         stop: options?.stop,
         tools: shaped.tools,
         tool_choice: options?.tool_choice,
-        parallel_tool_calls: options?.parallel_tool_calls,
+        parallel_tool_calls: this.resolveParallelToolCalls(options),
         ...extendedBodyParams(this.platform, options),
         stream: true,
         stream_options: options?.stream_options,
@@ -290,6 +291,6 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
   }
 
   async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<KeyValidationResult> {
-    return this.validationResult(await this.fetchCatalogEndpoint(this.modelsUrl, apiKey, quotaContext));
+    return this.validationResult(await this.fetchCatalogEndpoint(this.validateUrl ?? this.modelsUrl, apiKey, quotaContext));
   }
 }
