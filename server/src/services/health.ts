@@ -128,11 +128,12 @@ export async function pollKeyQuota(
   }
 }
 
-/** True when this provider overrides the no-op default fetchQuota (i.e. has a
- *  quota endpoint at all). OpenAICompatProvider overrides it with a spec-gated
- *  body, so a specless provider still returns false at zero network cost. */
-function supportsQuotaPolling(provider: BaseProvider): boolean {
-  return provider.fetchQuota !== BaseProvider.prototype.fetchQuota;
+/** True when this provider actually has a quota endpoint to probe (#1403).
+ *  Uses the provider's own hasQuotaProbe getter: OpenAICompatProvider
+ *  overrides fetchQuota for every instance, spec or not, so a method-identity
+ *  check would claim quota support for specless platforms. */
+export function supportsQuotaPolling(provider: BaseProvider): boolean {
+  return provider.hasQuotaProbe;
 }
 
 /** Throttled, self-contained quota poll for one key — the entry point other

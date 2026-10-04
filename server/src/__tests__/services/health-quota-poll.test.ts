@@ -12,8 +12,9 @@ vi.mock('../../providers/index.js', () => ({
   resolveProvider: () => ({
     name: 'OpenRouter',
     validateKey,
-    // Stands in for the OpenAICompatProvider override (a real override, so
+    // Stands in for the OpenAICompatProvider override (hasQuotaProbe true, so
     // supportsQuotaPolling passes it).
+    hasQuotaProbe: true,
     fetchQuota,
   }),
 }));

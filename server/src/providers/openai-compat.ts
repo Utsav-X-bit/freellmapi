@@ -579,6 +579,10 @@ export class OpenAICompatProvider extends BaseProvider {
    * Never throws: a quota probe that fails says nothing about the key, and
    * the caller's health verdict must stay about the key.
    */
+  get hasQuotaProbe(): boolean {
+    return this.quotaProbe !== undefined;
+  }
+
   async fetchQuota(apiKey: string, quotaContext?: QuotaObservationContext): Promise<boolean> {
     const spec = this.quotaProbe;
     if (!spec) return false;

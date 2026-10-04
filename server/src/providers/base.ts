@@ -260,6 +260,14 @@ export abstract class BaseProvider {
     return false;
   }
 
+  /** Whether this provider actually has a quota endpoint to probe (#1403).
+   * fetchQuota alone can't answer it: OpenAICompatProvider overrides the
+   * method for every instance, spec or not. Routes that owe the operator a
+   * "this platform has no quota endpoint" answer must use this instead. */
+  get hasQuotaProbe(): boolean {
+    return false;
+  }
+
   /**
    * Turn a conventional 401/403 validation response into a diagnostic result.
    * Providers still return a simple boolean when no useful error body exists,
