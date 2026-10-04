@@ -4,7 +4,7 @@
 
 | Commit | Date | Summary |
 | --- | --- | --- |
-| _(via #1404)_ | 2026-10-04 | providers: quota polling — `BaseProvider.fetchQuota` / `quota_api` observations piggybacked on the health pass with a per-key 15-min throttle (issue #1403 phase 1) |
+| _(via #1404)_ | 2026-10-04 | providers: quota polling — `BaseProvider.fetchQuota` / `quota_api` observations piggybacked on the health pass with a per-key 15-min throttle (issue #1403 phase 1); SiliconFlow `/v1/user/info` balance registered, string-encoded balances accepted |
 | `ef1b9ce` | 2026-09-05 | language-switcher line on every page, root-README anchors fixed from inside docs/, cli config page path (#1167) |
 | `eab992f` | 2026-09-02 | scaffold per-language en/ top-level (landed via #1164) |
 | `eab992f` | 2026-09-02 | move English domains under en/ (17 domains) (landed via #1164) |

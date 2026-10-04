@@ -356,6 +356,18 @@ register(new OpenAICompatProvider({
   platform: 'siliconflow',
   name: 'SiliconFlow',
   baseUrl: 'https://api.siliconflow.com/v1',
+  // #1403: SiliconFlow reports the account's credit balance on
+  // GET /v1/user/info (data.balance = gift credit, data.totalBalance = gift +
+  // charge; values arrive as numeric strings in CNY). There is no limit field,
+  // so the probe records remaining only — a real number beats parseBudget's 0
+  // for this pool.
+  quotaProbe: {
+    url: 'https://api.siliconflow.com/v1/user/info',
+    metric: 'credits',
+    limitFields: [],
+    remainingFields: ['totalBalance', 'balance'],
+    notes: 'siliconflow user-info: CNY credit balance (totalBalance)',
+  },
 }));
 
 // Routeway — OpenAI-compatible aggregator (api.routeway.ai/v1). Free models

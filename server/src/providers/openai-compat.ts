@@ -601,6 +601,13 @@ export class OpenAICompatProvider extends BaseProvider {
           for (const f of fields) {
             const v = (obj as Record<string, unknown>)[f];
             if (typeof v === 'number' && Number.isFinite(v)) return v;
+            // Some providers serialize balances as strings ("88.88", SiliconFlow
+            // /v1/user/info). Accept a numeric string; "", null and prose never
+            // parse to a finite number.
+            if (typeof v === 'string' && v.trim() !== '') {
+              const n = Number(v);
+              if (Number.isFinite(n)) return n;
+            }
           }
         }
         return null;

@@ -121,4 +121,46 @@ describe('fetchQuota — provider-reported quota polling (#1403)', () => {
     expect(ok).toBe(true);
     expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe('https://openrouter.ai/api/v1/key');
   });
+
+  it('accepts string-encoded balances (SiliconFlow returns "88.88")', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ code: 200, data: { id: 'u', balance: '7.3972', chargeBalance: '15.2505', totalBalance: '22.6478', status: 'normal' } }),
+    } as any);
+    const provider = makeProvider({
+      url: 'https://api.siliconflow.com/v1/user/info', metric: 'credits',
+      limitFields: [], remainingFields: ['totalBalance', 'balance'],
+    });
+    const ok = await provider.fetchQuota('sk-test', { platform: 'openrouter', keyId: 3 });
+    expect(ok).toBe(true);
+    const rows = stateRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ metric: 'credits', limit_value: null, remaining_value: 22.6478, source: 'quota_api' });
+  });
+
+  it('a non-numeric string is not a balance', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ data: { totalBalance: '', balance: null } }),
+    } as any);
+    const provider = makeProvider({
+      url: 'https://api.siliconflow.com/v1/user/info', metric: 'credits',
+      limitFields: [], remainingFields: ['totalBalance', 'balance'],
+    });
+    expect(await provider.fetchQuota('sk-test', { platform: 'openrouter', keyId: 3 })).toBe(false);
+    expect(stateRows()).toHaveLength(0);
+  });
+
+  it('the registered SiliconFlow provider carries the /v1/user/info probe', async () => {
+    const provider = resolveProvider('siliconflow');
+    expect(provider).toBeDefined();
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ data: { balance: '0.88', totalBalance: '0.88' } }),
+    } as any);
+    getDb().prepare('DELETE FROM provider_quota_state').run();
+    const ok = await provider!.fetchQuota('sk-sf', { platform: 'siliconflow', keyId: 9 });
+    expect(ok).toBe(true);
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe('https://api.siliconflow.com/v1/user/info');
+    expect(stateRows('siliconflow')[0]).toMatchObject({ remaining_value: 0.88, source: 'quota_api' });
+  });
 });
