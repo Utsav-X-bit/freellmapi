@@ -65,6 +65,7 @@ export const PLATFORMS: { value: Platform; label: string; url: string; keyless?:
   { value: 'llm7', label: 'LLM7 (anon ok)', url: 'https://llm7.io' },
   { value: 'huggingface', label: 'HuggingFace Router', url: 'https://huggingface.co/settings/tokens' },
   { value: 'opencode', label: 'OpenCode Zen (paid models only)', url: 'https://opencode.ai/auth' },
+  { value: 'opencode-free', label: 'OpenCode Zen Free (no key needed)', url: 'https://opencode.ai/zen', keyless: true },
   { value: 'agnes', label: 'Agnes AI (free key)', url: 'https://platform.agnes-ai.com' },
   { value: 'reka', label: 'Reka (prepaid credits)', url: 'https://platform.reka.ai' },
   { value: 'siliconflow', label: 'SiliconFlow (image + TTS)', url: 'https://siliconflow.com' },
