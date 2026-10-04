@@ -72,8 +72,8 @@ export function inBandCreditsError(text: string | null | undefined): string | nu
 export class OpenAICompatProvider extends BaseProvider {
   readonly platform: Platform;
   readonly name: string;
-  private readonly baseUrl: string;
-  private readonly extraHeaders: Record<string, string>;
+  protected readonly baseUrl: string;
+  protected readonly extraHeaders: Record<string, string>;
   private readonly validateUrl?: string;
   /** Per-provider HTTP timeout override. OpenAI-compatible gateways often buffer
    * non-streaming responses until generation completes, and reasoning models can
@@ -175,7 +175,7 @@ export class OpenAICompatProvider extends BaseProvider {
    * of the anonymous path, and a real key on a custom endpoint still gets its
    * bearer (#1331): the presence of a credential decides at request time —
    * Kilo, OVH and AI Horde all accept both modes per their docs. */
-  private authHeader(apiKey: string): Record<string, string> {
+  protected authHeader(apiKey: string): Record<string, string> {
     return bearerAuthHeader(apiKey);
   }
 
