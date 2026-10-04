@@ -685,7 +685,9 @@
     "monthlyTokenCapLabel": "月間トークン上限",
     "capUnlimitedPlaceholder": "無制限",
     "capEditHint": "上限は毎月1日 00:00 UTC にリセットされます。無制限は空欄のままにしてください。",
-    "monthlyUsageLine": "今月 {requests} リクエスト、{tokens} トークン"
+    "monthlyUsageLine": "今月 {requests} リクエスト、{tokens} トークン",
+    "quotaBalanceHint": "{remaining} of {limit} {metric} left",
+    "quotaBalanceLeft": "{remaining} left"
   },
   "backups": {
     "title": "Backups",

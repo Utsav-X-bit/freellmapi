@@ -685,7 +685,9 @@
     "monthlyTokenCapLabel": "Maandelijke limiet tokens",
     "capUnlimitedPlaceholder": "Onbeperkt",
     "capEditHint": "Limieten worden op de 1e om 00:00 UTC gereset. Laat leeg voor onbeperkt.",
-    "monthlyUsageLine": "{requests} verzoeken, {tokens} tokens deze maand"
+    "monthlyUsageLine": "{requests} verzoeken, {tokens} tokens deze maand",
+    "quotaBalanceHint": "{remaining} of {limit} {metric} left",
+    "quotaBalanceLeft": "{remaining} left"
   },
   "backups": {
     "title": "Backups",

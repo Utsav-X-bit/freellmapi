@@ -685,7 +685,9 @@
     "monthlyTokenCapLabel": "每月 Token 上限",
     "capUnlimitedPlaceholder": "無限制",
     "capEditHint": "配額在每月 1 日 00:00 UTC 重設。留空表示無限制。",
-    "monthlyUsageLine": "本月 {requests} 次請求，{tokens} tokens"
+    "monthlyUsageLine": "本月 {requests} 次請求，{tokens} tokens",
+    "quotaBalanceHint": "{remaining} of {limit} {metric} left",
+    "quotaBalanceLeft": "{remaining} left"
   },
   "backups": {
     "title": "Backups",

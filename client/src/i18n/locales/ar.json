@@ -685,7 +685,9 @@
     "monthlyTokenCapLabel": "الحد الشهري للرموز",
     "capUnlimitedPlaceholder": "غير محدود",
     "capEditHint": "تُصفَّر الحدود في 1 من الشهر 00:00 بتوقيت UTC. اتركه فارغًا بلا حد.",
-    "monthlyUsageLine": "{requests} طلبًا، {tokens} رمز هذا الشهر"
+    "monthlyUsageLine": "{requests} طلبًا، {tokens} رمز هذا الشهر",
+    "quotaBalanceHint": "{remaining} of {limit} {metric} left",
+    "quotaBalanceLeft": "{remaining} left"
   },
   "backups": {
     "title": "Backups",
