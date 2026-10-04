@@ -344,7 +344,7 @@ export class AntigravityProvider extends BaseProvider {
     return cred;
   }
 
-  private async projectId(token: string, seed: string): Promise<string> {
+  async discoverProject(token: string): Promise<string> {
     for (const endpoint of ENDPOINTS) {
       try {
         const res = await this.fetchWithTimeout(`${endpoint}/v1internal:listCloudAICompanionProjects`, {
@@ -356,10 +356,12 @@ export class AntigravityProvider extends BaseProvider {
         if (id) return id;
       } catch { /* next endpoint */ }
     }
-    void seed;
     throw new Error('Google Antigravity project discovery failed on all endpoints');
   }
 
+  private async projectId(token: string): Promise<string> {
+    return this.discoverProject(token);
+  }
   /** Merge fetchAvailableModels payloads; static table stays the fallback. */
   async refreshCatalog(token: string, projectId: string): Promise<void> {
     for (const endpoint of ENDPOINTS) {
@@ -389,7 +391,7 @@ export class AntigravityProvider extends BaseProvider {
     quotaContext: QuotaObservationContext | undefined,
   ): Promise<Response> {
     const cred = await this.credential(apiKey);
-    const project = cred.projectId ?? await this.projectId(cred.token, cred.email ?? 'default');
+    const project = cred.projectId ?? await this.projectId(cred.token);
     const effort = options?.reasoning_effort ?? 'off';
     const { runtime, fallback } = this.resolveRuntime(modelId, effort);
     const body = JSON.stringify(buildGenerateBody(messages, modelId, runtime, project, options));
@@ -488,7 +490,7 @@ export class AntigravityProvider extends BaseProvider {
     let cred;
     try { cred = parseAntigravityCredential(apiKey); } catch { return { valid: false, error: 'Google Antigravity credential is not a login blob — complete Google login first' }; }
     try {
-      const project = cred.projectId ?? await this.projectId(cred.token, cred.email ?? 'default');
+      const project = cred.projectId ?? await this.projectId(cred.token);
       void quotaContext; void project;
       return true;
     } catch (err) {

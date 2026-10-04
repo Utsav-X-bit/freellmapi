@@ -43,6 +43,7 @@ const REQUEST_MODEL_ATTRIBUTION_FILENAME = '20260913_000001_request_model_attrib
 const KEY_MONTHLY_USAGE_FILENAME = '20260914_000001_key_monthly_usage.ts';
 const QUOTA_SNAPSHOT_FRESHNESS_FILENAME = '20260915_000001_quota_snapshot_freshness.ts';
 const OPENCODE_FREE_KILO_EXPANSION_FILENAME = '20261004_000001_opencode_free_kilo_expansion.ts';
+const ANTIGRAVITY_MODELS_FILENAME = '20261005_000001_antigravity_models.ts';
 
 interface SchemaRow {
   type: string;
@@ -132,6 +133,7 @@ describe('migration round trip', () => {
         KEY_MONTHLY_USAGE_FILENAME,
         QUOTA_SNAPSHOT_FRESHNESS_FILENAME,
         OPENCODE_FREE_KILO_EXPANSION_FILENAME,
+        ANTIGRAVITY_MODELS_FILENAME,
       ]);
     } finally {
       db.close();
