@@ -153,7 +153,10 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
     const maxOutput = resolveMaxTokens(this.platform, requested, options?.contextBudget);
     // OpenCode Zen gate: stream:false -> 403 FreeTierError even with valid UA/session.
     const body: Record<string, unknown> = { model: modelId, input: this.responsesInput(messages), store: false, stream: true };
-    if (maxOutput !== undefined) body.max_output_tokens = maxOutput;
+    // OpenCode Zen gate: max_output_tokens must be >= 16 (Zen 400s under 16).
+    // Muse Spark reasons before answering (~60 tokens reasoning); clamp floor
+    // to 256 so short test prompts (outputLimit: 4) don't starve mid-thought.
+    body.max_output_tokens = Math.max(256, maxOutput ?? 256);
     const tools = this.responsesTools(options);
     if (tools.length > 0) body.tools = tools;
     return body;

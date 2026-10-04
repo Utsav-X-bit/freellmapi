@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type {
   ChatMessage,
   ChatCompletionResponse,
@@ -132,7 +132,7 @@ export function getThinkingConfig(modelId: string, effort: string | undefined): 
     return { includeThoughts: true, thinkingBudget: 1024 };
   }
   if (modelId.startsWith('gpt-oss-')) {
-    if (!effort || effort === 'off') return { includeThoughts: false, thinkingBudget: 0 };
+    // gpt-oss-120b requires thinking mode: budget 0 is rejected by Google with 400.
     return { includeThoughts: true, thinkingBudget: 8192 };
   }
   if (modelId.startsWith('gemini-3.5-flash') || modelId === 'gemini-3-flash-agent') {
@@ -141,7 +141,7 @@ export function getThinkingConfig(modelId: string, effort: string | undefined): 
     return { includeThoughts: true, thinkingBudget };
   }
   if (modelId.startsWith('gemini-3.1-pro') || modelId === 'gemini-pro-agent') {
-    if (!effort || effort === 'off') return { includeThoughts: false, thinkingBudget: 0 };
+    // gemini-3.1-pro requires thinking mode: budget 0 is rejected by Google with 400.
     return { includeThoughts: true, thinkingBudget: effort === 'high' || effort === 'xhigh' ? 10001 : 1001 };
   }
   if (modelId.startsWith('gemini-')) {
@@ -271,17 +271,36 @@ function uuid(): string {
 }
 
 /** Agent envelope: step = content-block count, last_step 0-based, requestId
- *  advances per completed assistant turn in the loop. */
-export function buildEnvelope(contentsLength: number, assistantTurns: number, sessionId?: string): AntigravityEnvelope {
+ *  advances per completed assistant turn in the loop; labels wire non-gemini/claude. */
+export function buildEnvelope(
+  runtimeModel: string,
+  contentsLength: number,
+  assistantTurns: number,
+  sessionId?: string,
+): AntigravityEnvelope {
+  const isClaude = runtimeModel.startsWith('claude-');
+  const isNonGemini = isClaude || runtimeModel.startsWith('gpt-oss-') || !runtimeModel.startsWith('gemini-');
   const step = Math.max(1, contentsLength);
-  const sid = sessionId ?? uuid();
+  const conversationId = uuid();
   const trajectoryId = uuid();
+  const randBytes = randomBytes(8);
+  const sid = sessionId ?? String(new DataView(randBytes.buffer, randBytes.byteOffset, 8).getBigInt64(0, true));
+  const claudeLabel = isClaude ? 'true' : 'false';
+  const nonGeminiLabel = isNonGemini ? 'true' : 'false';
   return {
     sessionId: sid,
     trajectoryId,
-    conversationId: sid,
-    requestId: `${trajectoryId}-${assistantTurns}`,
-    labels: { step: String(step), last_step_index: String(Math.max(0, contentsLength - 1)) },
+    conversationId,
+    requestId: `agent/${conversationId}/${Date.now()}/${trajectoryId}/${step}`,
+    labels: {
+      step: String(step),
+      last_step_index: String(Math.max(0, contentsLength - 1)),
+      request_id: `${trajectoryId}-${assistantTurns}`,
+      trajectory_id: trajectoryId,
+      used_claude: claudeLabel,
+      used_claude_conservative: claudeLabel,
+      used_non_gemini_model: nonGeminiLabel,
+    },
   };
 }
 
@@ -297,7 +316,7 @@ export function buildGenerateBody(
   const gemini = buildGeminiBody(messages, modelId, runtimeModel, options);
   const assistantTurns = messages.filter(m => m.role === 'assistant').length;
   const contents = gemini['contents'];
-  const envelope = buildEnvelope(Array.isArray(contents) ? contents.length : 1, assistantTurns, sessionId);
+  const envelope = buildEnvelope(runtimeModel, Array.isArray(contents) ? contents.length : 1, assistantTurns, sessionId);
   return {
     project: projectId,
     model: runtimeModel,
@@ -332,6 +351,19 @@ export function extractProjectId(data: unknown): string | undefined {
   }
   return undefined;
 }
+
+/** Stable UUID-shaped project id from a seed (email preferred, matches pi-antigravity). */
+export function stableProjectId(seed: string): string {
+  const bytes = createHash('sha1').update(`antigravity:${seed}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function defaultProjectId(seed = 'antigravity-default'): string {
+  return process.env.ANTIGRAVITY_PROJECT_ID?.trim() || stableProjectId(seed);
+}
 /** User-Agent matching the Antigravity CLI wire fingerprint. */
 const ANTIGRAVITY_UA = 'antigravity/cli/1.2.4 (aidev_client; os_type=linux; arch=amd64; cl=982146307; auth_method=consumer)';
 
@@ -361,23 +393,39 @@ export class AntigravityProvider extends BaseProvider {
     return cred;
   }
 
-  async discoverProject(token: string): Promise<string> {
+  async discoverProject(token: string, seed = 'antigravity-default'): Promise<string> {
     for (const endpoint of ENDPOINTS) {
       try {
-        const res = await this.fetchWithTimeout(`${endpoint}/v1internal:listCloudAICompanionProjects`, {
-          method: 'POST', headers: this.headers(token), body: JSON.stringify({}),
+        const res = await this.fetchWithTimeout(`${endpoint}/v1internal:loadCodeAssist`, {
+          method: 'POST',
+          headers: this.headers(token),
+          body: JSON.stringify({ metadata: { ideType: 'ANTIGRAVITY' } }),
         }, 8000, { timeoutBounds: 'request' });
-        if (!res.ok) continue;
-        const data = (await res.json()) as unknown;
-        const id = extractProjectId(data);
-        if (id) return id;
+        if (res.ok) {
+          const data = (await res.json()) as unknown;
+          const id = extractProjectId(data);
+          if (id) return id;
+        }
+      } catch { /* try list */ }
+
+      try {
+        const res = await this.fetchWithTimeout(`${endpoint}/v1internal:listCloudAICompanionProjects`, {
+          method: 'POST',
+          headers: this.headers(token),
+          body: JSON.stringify({}),
+        }, 8000, { timeoutBounds: 'request' });
+        if (res.ok) {
+          const data = (await res.json()) as unknown;
+          const id = extractProjectId(data);
+          if (id) return id;
+        }
       } catch { /* next endpoint */ }
     }
-    throw new Error('Google Antigravity project discovery failed on all endpoints');
+    return defaultProjectId(seed);
   }
 
-  private async projectId(token: string): Promise<string> {
-    return this.discoverProject(token);
+  private async projectId(token: string, email?: string): Promise<string> {
+    return this.discoverProject(token, email || 'antigravity-default');
   }
   /** Merge fetchAvailableModels payloads; static table stays the fallback. */
   async refreshCatalog(token: string, projectId: string): Promise<void> {
@@ -408,7 +456,7 @@ export class AntigravityProvider extends BaseProvider {
     quotaContext: QuotaObservationContext | undefined,
   ): Promise<Response> {
     const cred = await this.credential(apiKey);
-    const project = cred.projectId ?? await this.projectId(cred.token);
+    const project = cred.projectId ?? await this.projectId(cred.token, cred.email);
     const effort = options?.reasoning_effort ?? 'off';
     const { runtime, fallback } = this.resolveRuntime(modelId, effort);
     const body = JSON.stringify(buildGenerateBody(messages, modelId, runtime, project, options));
@@ -467,9 +515,11 @@ export class AntigravityProvider extends BaseProvider {
           if (!trimmed || !trimmed.startsWith('data:')) continue;
           const data = trimmed.slice(5).trim();
           if (data === '[DONE]') return;
-          let frame: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }> };
-          try { frame = JSON.parse(data); } catch { continue; }
-          for (const cand of frame.candidates ?? []) {
+          let frame: Record<string, unknown>;
+          try { frame = JSON.parse(data) as Record<string, unknown>; } catch { continue; }
+          const resp = (frame['response'] && typeof frame['response'] === 'object') ? frame['response'] as Record<string, unknown> : frame;
+          const candidates = (Array.isArray(resp['candidates']) ? resp['candidates'] : []) as Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+          for (const cand of candidates) {
             const text = (cand.content?.parts ?? []).map(p => p.text ?? '').join('');
             if (text) yield { ...base, choices: [{ index: 0, delta: { content: text }, finish_reason: null }] };
             if (cand.finishReason) {
@@ -507,7 +557,7 @@ export class AntigravityProvider extends BaseProvider {
     let cred;
     try { cred = parseAntigravityCredential(apiKey); } catch { return { valid: false, error: 'Google Antigravity credential is not a login blob — complete Google login first' }; }
     try {
-      const project = cred.projectId ?? await this.projectId(cred.token);
+      const project = cred.projectId ?? await this.projectId(cred.token, cred.email);
       void quotaContext; void project;
       return true;
     } catch (err) {

@@ -36,8 +36,8 @@ describe('antigravity request path', () => {
   });
   // Antigravity SSE shape: candidates[0].content.parts[].text frames.
   const agySse = (text: string) =>
-    `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }], role: 'model' } }] })}\n\n` +
-    `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: '' }], role: 'model' }, finishReason: 'STOP' }] })}\n\n` +
+    `data: ${JSON.stringify({ response: { candidates: [{ content: { parts: [{ text }], role: 'model' } }] } })}\n\n` +
+    `data: ${JSON.stringify({ response: { candidates: [{ content: { parts: [{ text: '' }], role: 'model' }, finishReason: 'STOP' }] } })}\n\n` +
     `data: [DONE]\n\n`;
 
   it('builds the Agent envelope with counters and project', () => {
@@ -52,6 +52,8 @@ describe('antigravity request path', () => {
     const req = body['request'] as { labels?: Record<string, string> };
     expect(req.labels?.['step']).toBe('3');
     expect(req.labels?.['last_step_index']).toBe('2');
+    expect(req.labels?.['used_non_gemini_model']).toBe('false');
+    expect(req.labels?.['used_claude']).toBe('false');
   });
 
   it('classifies hard quota walls vs transient throttling', () => {
