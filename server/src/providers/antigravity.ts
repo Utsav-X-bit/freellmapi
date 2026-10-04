@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type {
   ChatMessage,
   ChatCompletionResponse,
@@ -6,9 +7,12 @@ import type {
   ChatToolChoice,
   Platform,
 } from '@freellmapi/shared/types.js';
-import { BaseProvider, type CompletionOptions, type KeyValidationResult } from './base.js';
+import { BaseProvider, providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
 import type { QuotaObservationContext } from '../services/provider-quota.js';
+import { recordQuotaObservationsFromResponse } from '../services/provider-quota.js';
 import { contentToString } from '../lib/content.js';
+import { providerTimeoutMs } from '../lib/provider-timeout.js';
+import { parseCredential as parseAntigravityCredential, isExpired as isAntigravityExpired, refreshCredential as refreshAntigravityCredential, type AntigravityCredential as Credential } from '../lib/antigravity-auth.js';
 
 /** Cloud Code Assist endpoint candidates, production first. */
 export const ENDPOINTS = [
@@ -222,20 +226,273 @@ export function buildGeminiBody(
   return body;
 }
 
-/** Full request path lands in Task 4; this stub keeps the registry green. */
+/** Quota-wall classification: hard per-account walls carry a reset hint and
+ *  must fail over to the next account/key instead of burning retries on the
+ *  same credential; transient throttling stays retryable. */
+export function isHardQuotaWall(status: number | undefined, text: string): boolean {
+  if (status !== 429) return false;
+  if (/Individual quota reached/i.test(text)) return true;
+  if (/Resets? in /i.test(text)) return true;
+  if (/rate.?limit/i.test(text)) return false;
+  return /quota exceeded|exceeded your|daily limit/i.test(text);
+}
+
+export interface AntigravityEnvelope {
+  sessionId: string;
+  requestId: string;
+  trajectoryId: string;
+  conversationId: string;
+  labels: Record<string, string>;
+}
+
+function uuid(): string {
+  const b = randomBytes(16);
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = [...b].map(x => (x as number).toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/** Agent envelope: step = content-block count, last_step 0-based, requestId
+ *  advances per completed assistant turn in the loop. */
+export function buildEnvelope(contentsLength: number, assistantTurns: number, sessionId?: string): AntigravityEnvelope {
+  const step = Math.max(1, contentsLength);
+  const sid = sessionId ?? uuid();
+  const trajectoryId = uuid();
+  return {
+    sessionId: sid,
+    trajectoryId,
+    conversationId: sid,
+    requestId: `${trajectoryId}-${assistantTurns}`,
+    labels: { step: String(step), last_step_index: String(Math.max(0, contentsLength - 1)) },
+  };
+}
+
+/** Full generate request: envelope + project + runtime model id. */
+export function buildGenerateBody(
+  messages: ChatMessage[],
+  modelId: string,
+  runtimeModel: string,
+  projectId: string,
+  options?: CompletionOptions,
+  sessionId?: string,
+): Record<string, unknown> {
+  const gemini = buildGeminiBody(messages, modelId, runtimeModel, options);
+  const assistantTurns = messages.filter(m => m.role === 'assistant').length;
+  const contents = gemini['contents'];
+  const envelope = buildEnvelope(Array.isArray(contents) ? contents.length : 1, assistantTurns, sessionId);
+  return {
+    project: projectId,
+    model: runtimeModel,
+    request: { ...gemini, sessionId: envelope.sessionId, labels: envelope.labels },
+    requestType: 'Agent',
+    userAgent: 'antigravity',
+    requestId: envelope.requestId,
+  };
+}
+
+/** Pull a project id out of listCloudAICompanionProjects payloads (shape
+ *  varies: direct fields, nested {id}, or arrays under several keys). */
+export function extractProjectId(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const rec = data as Record<string, unknown>;
+  const direct = rec['antigravityProjectId'] ?? rec['projectId'] ?? rec['backendProjectId']
+    ?? rec['userDefinedCloudaicompanionProject'] ?? rec['cloudaicompanionProject'] ?? rec['project'];
+  if (typeof direct === 'string' && direct) return direct;
+  if (direct && typeof direct === 'object') {
+    const nested = (direct as Record<string, unknown>)['id'];
+    if (typeof nested === 'string' && nested) return nested;
+  }
+  for (const key of ['projects', 'projectIds', 'cloudaicompanionProjects']) {
+    const value = rec[key];
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string' && item) return item;
+        const nested = extractProjectId(item);
+        if (nested) return nested;
+      }
+    }
+  }
+  return undefined;
+}
+/** User-Agent matching the Antigravity CLI wire fingerprint. */
+const ANTIGRAVITY_UA = 'antigravity/cli/1.2.4 (aidev_client; os_type=linux; arch=amd64; cl=982146307; auth_method=consumer)';
+
 export class AntigravityProvider extends BaseProvider {
   readonly platform: Platform = 'antigravity';
   readonly name = 'Google Antigravity';
+  private readonly timeoutMs: number;
+  /** Discovered runtime ids from fetchAvailableModels (static fallback below). */
+  private discoveredRuntimes = new Set<string>();
 
-  async chatCompletion(): Promise<ChatCompletionResponse> {
-    throw new Error('AntigravityProvider.chatCompletion lands in Task 4');
+  constructor(timeoutMs?: number) {
+    super();
+    this.timeoutMs = providerTimeoutMs('antigravity', timeoutMs ?? 60_000);
   }
 
-  async *streamChatCompletion(): AsyncGenerator<ChatCompletionChunk> {
-    throw new Error('AntigravityProvider.streamChatCompletion lands in Task 4');
+  private headers(token: string): Record<string, string> {
+    return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': ANTIGRAVITY_UA };
   }
 
-  async validateKey(): Promise<KeyValidationResult> {
-    throw new Error('AntigravityProvider.validateKey lands in Task 4');
+  private record(res: Response, endpoint: string, quotaContext: QuotaObservationContext | undefined, modelId: string): void {
+    recordQuotaObservationsFromResponse(res, { platform: this.platform, keyId: quotaContext?.keyId, providerAccountId: quotaContext?.providerAccountId, modelId, quotaPoolKey: quotaContext?.quotaPoolKey, endpoint });
+  }
+
+  private async credential(apiKey: string): Promise<Credential> {
+    const cred = parseAntigravityCredential(apiKey);
+    if (isAntigravityExpired(cred)) return refreshAntigravityCredential(cred);
+    return cred;
+  }
+
+  private async projectId(token: string, seed: string): Promise<string> {
+    for (const endpoint of ENDPOINTS) {
+      try {
+        const res = await this.fetchWithTimeout(`${endpoint}/v1internal:listCloudAICompanionProjects`, {
+          method: 'POST', headers: this.headers(token), body: JSON.stringify({}),
+        }, 8000, { timeoutBounds: 'request' });
+        if (!res.ok) continue;
+        const data = (await res.json()) as unknown;
+        const id = extractProjectId(data);
+        if (id) return id;
+      } catch { /* next endpoint */ }
+    }
+    void seed;
+    throw new Error('Google Antigravity project discovery failed on all endpoints');
+  }
+
+  /** Merge fetchAvailableModels payloads; static table stays the fallback. */
+  async refreshCatalog(token: string, projectId: string): Promise<void> {
+    for (const endpoint of ENDPOINTS) {
+      try {
+        const res = await this.fetchWithTimeout(`${endpoint}/v1internal:fetchAvailableModels`, {
+          method: 'POST', headers: this.headers(token), body: JSON.stringify({ project: projectId }),
+        }, 8000, { timeoutBounds: 'request' });
+        if (!res.ok) continue;
+        const data = (await res.json()) as { models?: Record<string, unknown> };
+        if (data.models) {
+          for (const id of Object.keys(data.models)) {
+            if (/^(gemini-|claude-|gpt-oss-)/i.test(id) && !id.startsWith('MODEL_')) this.discoveredRuntimes.add(id);
+          }
+          return;
+        }
+      } catch { /* next endpoint */ }
+    }
+  }
+
+  private resolveRuntime(modelId: string, effort: string): { runtime: string; fallback?: string } {
+    const runtime = getRuntimeModelId(modelId, effort);
+    return { runtime, fallback: getFallbackRuntimeModel(runtime, effort) };
+  }
+
+  private async generate(
+    apiKey: string, messages: ChatMessage[], modelId: string, options: CompletionOptions | undefined,
+    quotaContext: QuotaObservationContext | undefined,
+  ): Promise<Response> {
+    const cred = await this.credential(apiKey);
+    const project = cred.projectId ?? await this.projectId(cred.token, cred.email ?? 'default');
+    const effort = options?.reasoning_effort ?? 'off';
+    const { runtime, fallback } = this.resolveRuntime(modelId, effort);
+    const body = JSON.stringify(buildGenerateBody(messages, modelId, runtime, project, options));
+    const runtimes = fallback ? [runtime, fallback] : [runtime];
+    let lastText = '';
+    let lastStatus = 0;
+    for (const rt of runtimes) {
+      void rt;
+      for (const endpoint of ENDPOINTS) {
+        const res = await this.fetchWithTimeout(`${endpoint}/v1internal:streamGenerateContent?alt=sse`, {
+          method: 'POST', headers: this.headers(cred.token), body,
+        }, options?.timeoutMs ?? this.timeoutMs, { signal: options?.signal });
+        this.record(res, 'streamGenerateContent', quotaContext, modelId);
+        if (res.ok) return res;
+        lastStatus = res.status;
+        lastText = await res.text().catch(() => '');
+        if (isHardQuotaWall(res.status, lastText)) break;
+        if (![403, 404, 429, 500, 502, 503, 504].includes(res.status)) break;
+      }
+    }
+    throw providerHttpError(new Response(null, { status: lastStatus || 502 }), `Google Antigravity API error ${lastStatus}: ${lastText.slice(0, 300)}`);
+  }
+
+  async chatCompletion(
+    apiKey: string, messages: ChatMessage[], modelId: string, options?: CompletionOptions, quotaContext?: QuotaObservationContext,
+  ): Promise<ChatCompletionResponse> {
+    const res = await this.generate(apiKey, messages, modelId, options, quotaContext);
+    const { content, finish } = await this.accumulateAntigravityStream(res, options, modelId);
+    return {
+      id: `chatcmpl-agy-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: modelId,
+      choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: finish }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      _routed_via: { platform: this.platform, model: modelId },
+    };
+  }
+
+  /** Antigravity SSE frames carry candidates[].content.parts[].text (Gemini
+   *  shape), not OpenAI choices[].delta — translate frame by frame. */
+  private async *translateAntigravityStream(res: Response, options: CompletionOptions | undefined, modelId: string): AsyncGenerator<ChatCompletionChunk> {
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('No response body');
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let sawFinish = false;
+    const base = { id: `chatcmpl-agy-${Date.now()}`, object: 'chat.completion.chunk' as const, created: Math.floor(Date.now() / 1000), model: modelId };
+    yield { ...base, choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] };
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === '[DONE]') return;
+          let frame: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }> };
+          try { frame = JSON.parse(data); } catch { continue; }
+          for (const cand of frame.candidates ?? []) {
+            const text = (cand.content?.parts ?? []).map(p => p.text ?? '').join('');
+            if (text) yield { ...base, choices: [{ index: 0, delta: { content: text }, finish_reason: null }] };
+            if (cand.finishReason) {
+              sawFinish = true;
+              yield { ...base, choices: [{ index: 0, delta: {}, finish_reason: cand.finishReason === 'MAX_TOKENS' ? 'length' : 'stop' }] };
+            }
+          }
+        }
+      }
+    } finally {
+      reader.cancel().catch(() => { /* upstream already gone */ });
+    }
+    if (!sawFinish) yield { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] };
+  }
+
+  private async accumulateAntigravityStream(res: Response, options: CompletionOptions | undefined, modelId: string): Promise<{ content: string; finish: 'stop' | 'length' }> {
+    let content = '';
+    let finish: 'stop' | 'length' = 'stop';
+    for await (const chunk of this.translateAntigravityStream(res, options, modelId)) {
+      const choice = chunk.choices?.[0];
+      if (typeof choice?.delta?.content === 'string') content += choice.delta.content;
+      if (choice?.finish_reason === 'length') finish = 'length';
+    }
+    return { content, finish };
+  }
+
+  async *streamChatCompletion(
+    apiKey: string, messages: ChatMessage[], modelId: string, options?: CompletionOptions, quotaContext?: QuotaObservationContext,
+  ): AsyncGenerator<ChatCompletionChunk> {
+    const res = await this.generate(apiKey, messages, modelId, options, quotaContext);
+    yield* this.translateAntigravityStream(res, options, modelId);
+  }
+
+  async validateKey(apiKey: string, quotaContext?: QuotaObservationContext): Promise<KeyValidationResult> {
+    let cred;
+    try { cred = parseAntigravityCredential(apiKey); } catch { return { valid: false, error: 'Google Antigravity credential is not a login blob — complete Google login first' }; }
+    try {
+      const project = cred.projectId ?? await this.projectId(cred.token, cred.email ?? 'default');
+      void quotaContext; void project;
+      return true;
+    } catch (err) {
+      return { valid: false, error: `Google Antigravity validation failed: ${(err as Error).message}` };
+    }
   }
 }
