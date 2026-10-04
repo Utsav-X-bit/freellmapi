@@ -51,7 +51,7 @@ describe('quirks resolution (migrateQuirksV1)', () => {
     const defs = listQuirkDefinitions();
     const keyless = defs.find((d) => d.slug === 'keyless-anonymous');
     expect(keyless).toBeDefined();
-    // Pollinations chat now requires a publishable key; three anonymous
+    // Pollinations chat now requires a publishable key; four anonymous
     // providers remain in the baseline selector.
     const platforms = keyless!.targets.map((t) => t.platform).sort();
     expect(platforms).toEqual(['kilo', 'llm7', 'opencode-free', 'ovh']);
