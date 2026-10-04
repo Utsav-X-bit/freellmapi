@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { ChatMessage, ChatCompletionResponse, ChatCompletionChunk, Platform } from '@freellmapi/shared/types.js';
+import type { ChatMessage, ChatCompletionResponse, ChatCompletionChunk, ChatToolCall, Platform } from '@freellmapi/shared/types.js';
 import { OpenAICompatProvider } from './openai-compat.js';
 import { providerHttpError, type CompletionOptions, type KeyValidationResult } from './base.js';
 import { extendedBodyParams, resolveMaxTokens } from '../lib/sampling-params.js';
@@ -10,7 +10,6 @@ import { recordQuotaObservationsFromResponse, type QuotaObservationContext } fro
 const ZEN_BASE_URL = 'https://opencode.ai/zen/v1';
 const OPENCODE_UA = 'opencode/1.18.31';
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 const FINGERPRINT_TOOLS = ['bash', 'glob', 'grep', 'read'] as const;
 
 function rand14(): string {
@@ -237,9 +236,30 @@ export class OpenCodeFreeProvider extends OpenAICompatProvider {
       const err = await res.json().catch(() => ({}));
       throw providerHttpError(res, `${this.name} API error ${res.status}: ${upstreamErrorText(err, res)}`, err);
     }
-    const data = await res.json() as ChatCompletionResponse;
-    data._routed_via = { platform: this.platform, model: modelId };
-    return data;
+    // stream:true is a fingerprint requirement, so Zen answers this path with
+    // SSE frames, not a single JSON document: accumulate the deltas into one
+    // terminal response (same shape the streaming path yields per chunk).
+    let content = '';
+    const toolCalls: ChatToolCall[] = [];
+    let finish: ChatCompletionResponse['choices'][number]['finish_reason'] = 'stop';
+    let usage: ChatCompletionResponse['usage'] | undefined;
+    for await (const chunk of this.readSseStream(res, { firstByteTimeoutMs: this.requestTimeoutMs(options) })) {
+      const choice = chunk.choices?.[0];
+      if (typeof choice?.delta?.content === 'string') content += choice.delta.content;
+      if (choice?.delta?.tool_calls) toolCalls.push(...choice.delta.tool_calls);
+      if (choice?.finish_reason) finish = choice.finish_reason;
+      const u = (chunk as { usage?: ChatCompletionResponse['usage'] }).usage;
+      if (u) usage = u;
+    }
+    return {
+      id: `chatcmpl-zen-${Date.now()}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: modelId,
+      choices: [{ index: 0, message: { role: 'assistant', content, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finish_reason: finish }],
+      usage: usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      _routed_via: { platform: this.platform, model: modelId },
+    };
   }
 
   async *streamChatCompletion(

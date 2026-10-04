@@ -1,4 +1,5 @@
-// Migration: seed 8 opencode-free + 19 Kilo :free models, all enabled.
+// Migration: seed 8 opencode-free + 17 new Kilo :free models, all enabled
+// (2 kilo ids pre-exist from V20 and are only re-asserted, not inserted).
 // Created: 2026-10-04
 //
 // DOWN: reversible disable (opencode-free only). Kilo rows stay: they belong to
@@ -6,10 +7,10 @@
 // bit-for-bit: re-inserting would mint new AUTOINCREMENT ids and reshuffle
 // fallback_config priorities, breaking the migration roundtrip test.
 //
-// All claims live-probed 2026-10-04: opencode-free rows carry conservative
-// 20rpm/200rpd limits with a fingerprint-gated budget label; Kilo :free rows
-// are IP-based (200/hr) so no per-key limits are seeded. Pricing table
-// untouched (null = free display).
+// opencode-free rows carry conservative 20rpm/200rpd limits with a
+// fingerprint-gated budget label; Kilo :free rows are IP-based (200/hr) so no
+// per-key limits are seeded. Price display lives in the static
+// model-pricing.ts map (edited in a separate commit), not a DB table.
 
 import type { Db } from '../types.js';
 

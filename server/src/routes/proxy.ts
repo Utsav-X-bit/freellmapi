@@ -183,10 +183,11 @@ const REASONING_TTL_MS = 30 * 60 * 1000; // 30 min, matching sticky sessions
 
 // Platforms that reject an assistant turn WITHOUT `reasoning_content` once the
 // conversation is in thinking mode, i.e. where the field has to be present on
-// every assistant message and older turns need an empty-string filler. Only
-// OpenCode Zen is on record for this (the DeepSeek thinking semantics behind
-// #255/#797); everywhere else only the turn we actually have a trace for is
-// touched, so no other provider's bytes change.
+// every assistant message and older turns need an empty-string filler. OpenCode
+// Zen (keyed `opencode` and keyless `opencode-free`) is on record for this
+// (the DeepSeek thinking semantics behind #255/#797); everywhere else only
+// the turn we actually have a trace for is touched, so no other provider's
+// bytes change.
 const PLATFORMS_REQUIRING_REASONING_ECHO = new Set(['opencode', 'opencode-free']);
 
 function rememberReasoning(sessionKey: string | undefined, modelKey: string, reasoning: string) {

@@ -430,14 +430,14 @@ describe('Proxy tool-calling support', () => {
             .map(([k, v]) => [String(k).toLowerCase(), String(v)]),
         );
         providerBody = JSON.parse((init as any).body);
-        return {
-          ok: true,
-          json: () => Promise.resolve({
-            id: 'chatcmpl-z', object: 'chat.completion', created: 1, model: 'mimo-v2.5-free',
-            choices: [{ index: 0, message: { role: 'assistant', content: 'fingerprint ok' }, finish_reason: 'stop' }],
-            usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
-          }),
-        } as any;
+        // stream:true is a fingerprint requirement: Zen answers SSE even for
+        // non-streaming callers; the provider accumulates the frames.
+        const sse = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`;
+        const chunk = (delta: unknown, finish: string | null) => ({ id: 'c1', object: 'chat.completion.chunk', created: 1, model: 'mimo-v2.5-free', choices: [{ index: 0, delta, finish_reason: finish }] });
+        return new Response(
+          sse(chunk({ role: 'assistant' }, null)) + sse(chunk({ content: 'fingerprint ok' }, null)) + sse(chunk({}, 'stop')) + 'data: [DONE]\n\n',
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+        );
       }
       return origFetch(url, init);
     });
